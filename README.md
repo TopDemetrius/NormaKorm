@@ -98,11 +98,6 @@ python run.py
 
 Налаштування знаходяться в [app/config.py](app/config.py):
 
-```python
-SECRET_KEY = os.environ.get('SECRET_KEY', 'normakorm-dev-secret-key-2026')
-DATABASE   = os.path.join(BASE_DIR, 'normakorm.db')
-DEBUG      = True
-```
 
 Для продакшену встановіть `SECRET_KEY` через змінну середовища та вимкніть `DEBUG`.
 
