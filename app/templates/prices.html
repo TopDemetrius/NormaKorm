@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}НормаКорм — Ціни{% endblock %}
+{% block page_title %}Ціни на інгредієнти{% endblock %}
+{% block page_subtitle %}Моніторинг та управління цінами на кормові інгредієнти{% endblock %}
+{% block page_actions %}
+<button class="btn btn-outline" onclick="openUpdatePrices()" id="btn-update-prices">Оновити ціни</button>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2 class="card-title">Історія цін</h2>
+    <table class="data-table" id="prices-table">
+        <thead>
+            <tr>
+                <th>Інгредієнт</th>
+                <th style="text-align:right">Поточна ціна</th>
+                <th style="text-align:right">Попередня ціна</th>
+                <th style="text-align:center">Зміна %</th>
+                <th>Оновлено</th>
+            </tr>
+        </thead>
+        <tbody id="prices-tbody">
+            <!-- Dynamic -->
+        </tbody>
+    </table>
+</div>
+
+<!-- Modal: Оновити ціни -->
+<div class="modal-overlay" id="update-prices-modal">
+    <div class="modal" style="max-width:600px">
+        <div class="modal-header">
+            <h3 class="modal-title">Оновити ціни</h3>
+            <button class="modal-close" onclick="closeModal('update-prices-modal')">&times;</button>
+        </div>
+        <div id="update-prices-form"></div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeModal('update-prices-modal')">Скасувати</button>
+            <button class="btn btn-primary" onclick="submitPrices()">Зберегти</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let pricesData = [];
+
+document.addEventListener('DOMContentLoaded', loadPrices);
+
+async function loadPrices() {
+    const res = await fetch('/api/prices');
+    pricesData = await res.json();
+
+    const tbody = document.getElementById('prices-tbody');
+    if (pricesData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><p class="empty-state-text">Ціни ще не задано</p></div></td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = pricesData.map(p => {
+        const changeClass = p.change_pct > 0 ? 'price-up' : p.change_pct < 0 ? 'price-down' : '';
+        const arrow = p.change_pct > 0 ? '↗' : p.change_pct < 0 ? '↘' : '';
+        const dateStr = p.last_updated ? p.last_updated.substring(0, 10) : '-';
+        return `<tr>
+            <td><strong>${p.name}</strong></td>
+            <td style="text-align:right">${p.current_price.toFixed(2)} ₴/кг</td>
+            <td style="text-align:right">${p.prev_price ? p.prev_price.toFixed(2) + ' ₴/кг' : '-'}</td>
+            <td style="text-align:center" class="${changeClass}">
+                ${p.change_pct !== 0 ? arrow + ' ' + Math.abs(p.change_pct).toFixed(1) + '%' : '-'}
+            </td>
+            <td>${dateStr}</td>
+        </tr>`;
+    }).join('');
+}
+
+function openUpdatePrices() {
+    const form = document.getElementById('update-prices-form');
+    form.innerHTML = pricesData.map(p => `
+        <div style="display:flex; align-items:center; gap:16px; padding:10px 0; border-bottom:1px solid var(--border-light);">
+            <span style="flex:1; font-weight:500;">${p.name}</span>
+            <span style="color:var(--text-muted); font-size:13px;">було: ${p.current_price.toFixed(2)} ₴</span>
+            <input type="number" step="0.01" class="form-input form-input-sm" style="width:120px"
+                   data-ing-id="${p.id}" value="${p.current_price.toFixed(2)}">
+        </div>
+    `).join('');
+    document.getElementById('update-prices-modal').classList.add('active');
+}
+
+async function submitPrices() {
+    const prices = [];
+    document.querySelectorAll('#update-prices-form input').forEach(inp => {
+        prices.push({
+            ingredient_id: parseInt(inp.dataset.ingId),
+            price: parseFloat(inp.value) || 0
+        });
+    });
+
+    const res = await fetch('/api/prices/update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ prices })
+    });
+    if (res.ok) {
+        closeModal('update-prices-modal');
+        showToast('Ціни оновлено', 'success');
+        loadPrices();
+    }
+}
+</script>
+{% endblock %}

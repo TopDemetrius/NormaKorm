@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}НормаКорм — Головна{% endblock %}
+{% block page_title %}Головна{% endblock %}
+{% block page_subtitle %}Огляд системи оптимізації раціонів{% endblock %}
+
+{% block content %}
+<div class="card" style="margin-bottom: 24px;">
+    <h2 class="card-title">Останні раціони</h2>
+    {% if rations %}
+    <table class="data-table" id="recent-rations-table">
+        <thead>
+            <tr>
+                <th>Назва раціону</th>
+                <th>Вид птиці</th>
+                <th>Вік</th>
+                <th>Поголів'я</th>
+                <th>Вартість/день</th>
+                <th>Статус</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rations %}
+            <tr style="cursor:pointer" onclick="location.href='/rations?id={{ r.id }}'">
+                <td><strong>{{ r.name }}</strong></td>
+                <td>{{ r.bird_type_name }}</td>
+                <td>{{ r.age_group_name }}</td>
+                <td>{{ "{:,}".format(r.flock_size).replace(",", " ") }}</td>
+                <td>—</td>
+                <td>
+                    <span class="badge badge-normal">Норма</span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p class="empty-state-text">Раціони ще не створені. <a href="/rations">Створити перший раціон →</a></p>
+    </div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2 class="card-title">Раціони з відхиленнями від норм</h2>
+    {% if deviations %}
+        {% for d in deviations %}
+        <div class="alert-card {{ d.status }}">
+            <div class="alert-info">
+                <svg class="alert-icon {{ d.status }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <div>
+                    <div class="alert-title">{{ d.ration_name }}</div>
+                    <div class="alert-desc">{{ d.nutrient }} {{ d.direction }} норми на {{ d.deviation_pct }}%</div>
+                </div>
+            </div>
+            <a href="/rations?id={{ d.ration_id }}" class="alert-action">Переглянути</a>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="empty-state">
+            <p class="empty-state-text">Всі раціони відповідають нормам або ще не створені.</p>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

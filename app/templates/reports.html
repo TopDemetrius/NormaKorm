@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}НормаКорм — Звіти{% endblock %}
+{% block page_title %}Звіти{% endblock %}
+{% block page_subtitle %}Аналітичні звіти та експорт даних{% endblock %}
+{% block page_actions %}
+<button class="btn btn-primary" onclick="generateReport()" id="btn-generate-report">Створити звіт</button>
+{% endblock %}
+
+{% block content %}
+<!-- Типи звітів -->
+<div class="report-type-cards">
+    <div class="report-type-card selected" onclick="selectReportType(this, 'rations')">
+        <svg class="report-type-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+        <div class="report-type-name">Раціони</div>
+    </div>
+    <div class="report-type-card" onclick="selectReportType(this, 'ingredients')">
+        <svg class="report-type-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        <div class="report-type-name">Інгредієнти</div>
+    </div>
+    <div class="report-type-card" onclick="selectReportType(this, 'prices')">
+        <svg class="report-type-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <div class="report-type-name">Ціни</div>
+    </div>
+    <div class="report-type-card" onclick="selectReportType(this, 'optimization')">
+        <svg class="report-type-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>
+        <div class="report-type-name">Оптимізація</div>
+    </div>
+</div>
+
+<!-- Фільтр дат -->
+<div class="card" style="margin-bottom:24px">
+    <h2 class="card-title">Параметри звіту</h2>
+    <div id="date-filter-row" style="display:flex; gap:16px; align-items:flex-end;">
+        <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">Дата від</label>
+            <input type="date" class="form-input" id="report-date-from">
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">Дата до</label>
+            <input type="date" class="form-input" id="report-date-to">
+        </div>
+    </div>
+    <div id="opt-data-info" style="display:none; margin-top:14px;"></div>
+</div>
+
+<!-- Останні звіти (статичний приклад) -->
+<div class="card">
+    <h2 class="card-title">Останні звіти</h2>
+    <div id="reports-list">
+        <div class="empty-state">
+            <p class="empty-state-text">Згенеруйте перший звіт натиснувши "Створити звіт"</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let selectedReportType = 'rations';
+
+function selectReportType(el, type) {
+    document.querySelectorAll('.report-type-card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    selectedReportType = type;
+
+    const dateRow = document.getElementById('date-filter-row');
+    const optInfo = document.getElementById('opt-data-info');
+
+    if (type === 'optimization') {
+        dateRow.style.display = 'none';
+        const stored = sessionStorage.getItem('lastOptimizationResult');
+        if (stored) {
+            const r = JSON.parse(stored);
+            const cost = r.total_cost ? r.total_cost.toFixed(2) + ' ₴/кг' : '—';
+            const ings = r.ingredients ? r.ingredients.length : 0;
+            optInfo.style.display = '';
+            optInfo.innerHTML = `<div style="background:#E8F5E9;border:1px solid #A5D6A7;border-radius:8px;padding:12px 14px;font-size:13px;">
+                ✅ <strong>Є збережений результат оптимізації</strong><br>
+                <span style="color:var(--text-secondary)">Вартість: ${cost} · Інгредієнтів: ${ings}</span>
+            </div>`;
+        } else {
+            optInfo.style.display = '';
+            optInfo.innerHTML = `<div style="background:#FFF3E0;border:1px solid #FFB74D;border-radius:8px;padding:12px 14px;font-size:13px;">
+                ⚠️ <strong>Немає даних оптимізації.</strong>
+                Спочатку виконайте оптимізацію на <a href="/optimization" style="color:var(--primary)">сторінці оптимізації</a>, потім поверніться сюди.
+            </div>`;
+        }
+    } else {
+        dateRow.style.display = 'flex';
+        optInfo.style.display = 'none';
+    }
+}
+
+async function generateReport() {
+    const dateFrom = document.getElementById('report-date-from').value;
+    const dateTo = document.getElementById('report-date-to').value;
+
+    const btn = document.getElementById('btn-generate-report');
+    btn.disabled = true;
+    btn.textContent = '⏳ Генерація...';
+
+    try {
+        const body = {
+            type: selectedReportType,
+            date_from: dateFrom || null,
+            date_to: dateTo || null
+        };
+
+        if (selectedReportType === 'optimization') {
+            const stored = sessionStorage.getItem('lastOptimizationResult');
+            if (!stored) {
+                showToast('Спочатку виконайте оптимізацію', 'error');
+                btn.disabled = false;
+                btn.textContent = 'Створити звіт';
+                return;
+            }
+            body.result = JSON.parse(stored);
+        }
+
+        const res = await fetch('/api/reports/generate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+
+        if (res.ok) {
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `report_${selectedReportType}_${new Date().toISOString().slice(0,10)}.pdf`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Звіт згенеровано та завантажено', 'success');
+
+            // Додати до списку
+            addReportToList(selectedReportType, dateFrom, dateTo);
+        } else {
+            const err = await res.json();
+            showToast(err.error || 'Помилка генерації', 'error');
+        }
+    } catch (e) {
+        showToast('Помилка: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Створити звіт';
+    }
+}
+
+function addReportToList(type, from, to) {
+    const typeName = {rations: 'Раціони', ingredients: 'Інгредієнти', prices: 'Ціни', optimization: 'Оптимізація'}[type];
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('uk-UA');
+    const list = document.getElementById('reports-list');
+
+    // Remove empty state
+    const emptyState = list.querySelector('.empty-state');
+    if (emptyState) emptyState.remove();
+
+    const item = document.createElement('div');
+    item.className = 'report-item';
+    item.innerHTML = `
+        <div class="report-item-info">
+            <div class="report-item-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>
+            </div>
+            <div>
+                <div class="report-item-name">${typeName} — звіт</div>
+                <div class="report-item-meta">${dateStr} • PDF</div>
+            </div>
+        </div>
+    `;
+    list.prepend(item);
+}
+</script>
+{% endblock %}

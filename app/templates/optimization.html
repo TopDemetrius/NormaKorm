@@ -1,0 +1,418 @@
+{% extends "base.html" %}
+{% block title %}НормаКорм — Оптимізація{% endblock %}
+{% block page_title %}Оптимізація раціонів{% endblock %}
+{% block page_subtitle %}Автоматичний підбір оптимального складу раціону{% endblock %}
+
+{% block content %}
+<!-- Wizard Steps -->
+<div class="wizard-steps">
+    <div class="wizard-step active" id="ws-1">
+        <div class="wizard-step-number">1</div>
+        <span>Параметри оптимізації</span>
+    </div>
+    <div class="wizard-line" id="wl-1"></div>
+    <div class="wizard-step" id="ws-2">
+        <div class="wizard-step-number">2</div>
+        <span>Результати</span>
+    </div>
+</div>
+
+<!-- Step 1: Parameters -->
+<div id="step-1">
+    <div style="display:grid; grid-template-columns: 1fr 380px; gap:24px;">
+        <div>
+            <!-- Група птиці -->
+            <div class="card" style="margin-bottom:20px">
+                <h2 class="card-title">Група птиці</h2>
+                <div class="form-group">
+                    <label class="form-label">Вид птиці</label>
+                    <select class="form-select" id="opt-bird-type" onchange="onOptBirdTypeChange()">
+                        <option value="">Оберіть вид...</option>
+                        {% for bt in species_tree %}
+                        <option value="{{ bt.id }}">{{ bt.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Вікова група</label>
+                    <select class="form-select" id="opt-age-group">
+                        <option value="">Оберіть групу...</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Режим оптимізації -->
+            <div class="card" style="margin-bottom:20px">
+                <h2 class="card-title">Режим оптимізації</h2>
+                <div class="radio-group">
+                    <label class="radio-option selected" onclick="selectMode(this, 'min_cost')">
+                        <input type="radio" name="opt-mode" value="min_cost" checked>
+                        <div>
+                            <div class="radio-label">Мінімальна вартість</div>
+                            <div class="radio-desc">Найдешевший раціон при дотриманні всіх норм</div>
+                        </div>
+                    </label>
+                    <label class="radio-option" onclick="selectMode(this, 'max_nutrition')">
+                        <input type="radio" name="opt-mode" value="max_nutrition">
+                        <div>
+                            <div class="radio-label">Максимальна поживність</div>
+                            <div class="radio-desc">Найкращі поживні показники</div>
+                        </div>
+                    </label>
+                    <label class="radio-option" onclick="selectMode(this, 'balanced')">
+                        <input type="radio" name="opt-mode" value="balanced">
+                        <div>
+                            <div class="radio-label">Збалансований</div>
+                            <div class="radio-desc">Баланс між вартістю та якістю</div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Обмеження бюджету -->
+            <div class="card">
+                <h2 class="card-title">Обмеження бюджету</h2>
+                <div class="form-group">
+                    <label class="form-label">Максимальна вартість, ₴/кг</label>
+                    <div style="display:flex; align-items:center; gap:14px;">
+                        <input type="range" class="range-slider" id="opt-budget" min="0" max="100" step="1" value="0" oninput="updateBudgetLabel()" style="flex:1;">
+                        <div id="budget-value" style="min-width:120px; font-size:15px; font-weight:600; text-align:right; color:var(--text-secondary);">Без обмежень</div>
+                    </div>
+                    <div class="range-labels">
+                        <span>0 — без обмежень</span>
+                        <span>100 ₴/кг</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Доступні інгредієнти -->
+        <div class="card" style="max-height:calc(100vh - 200px); overflow-y:auto;">
+            <h2 class="card-title">Доступні інгредієнти</h2>
+            <div class="search-box" style="margin-bottom:16px;">
+                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="opt-ing-search" placeholder="Пошук інгредієнтів..." oninput="filterOptIngredients()">
+            </div>
+            <div id="opt-ingredients-list">
+                {% for ing in all_ingredients %}
+                <label class="checkbox-item">
+                    <input type="checkbox" value="{{ ing.id }}" checked class="opt-ingredient-cb">
+                    <div>
+                        <div class="checkbox-label">{{ ing.name }}</div>
+                        <div class="checkbox-sublabel">{{ ing.category_name }}</div>
+                    </div>
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <div style="text-align:center; margin-top:24px;">
+        <button class="btn btn-primary" style="padding:14px 40px; font-size:16px;" onclick="runOptimization()" id="btn-run-optimization">
+            ✨ Оптимізувати
+        </button>
+    </div>
+</div>
+
+<!-- Step 2: Results -->
+<div id="step-2" style="display:none;">
+    <div style="display:grid; grid-template-columns:1fr 340px; gap:24px;">
+        <div class="card">
+            <h2 class="card-title">Оптимальний склад раціону</h2>
+            <div id="opt-status" style="margin-bottom:16px;"></div>
+            <table class="data-table" id="opt-results-table">
+                <thead>
+                    <tr>
+                        <th>Інгредієнт</th>
+                        <th style="text-align:center">%</th>
+                        <th style="text-align:right">Вартість ₴/кг</th>
+                    </tr>
+                </thead>
+                <tbody id="opt-results-tbody"></tbody>
+                <tfoot>
+                    <tr class="total-row">
+                        <td><strong>Всього</strong></td>
+                        <td style="text-align:center"><strong id="opt-total-pct">100</strong></td>
+                        <td style="text-align:right"><strong id="opt-total-cost">0.00</strong></td>
+                    </tr>
+                </tfoot>
+            </table>
+            <div id="opt-budget-warn" style="display:none;"></div>
+            <div style="margin-top:16px; display:flex; gap:10px;">
+                <button class="btn btn-primary" onclick="applyToRation()">Застосувати до раціону</button>
+                <button class="btn btn-secondary" onclick="goBack()">← Назад</button>
+            </div>
+        </div>
+
+        <!-- Аналіз норм -->
+        <div class="card" style="max-height:calc(100vh - 200px); overflow-y:auto;">
+            <h2 class="card-title">Аналіз поживності</h2>
+            <div id="opt-analysis-container"></div>
+            <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border-light);">
+                <div class="cost-label">Вартість 1 кг суміші</div>
+                <div class="cost-big" id="opt-cost-per-kg">0.00 ₴</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const speciesTree = {{ species_tree | tojson }};
+let optimizationResult = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+    const params = new URLSearchParams(location.search);
+    const agId = params.get('age_group');
+    if (agId) {
+        for (const bt of speciesTree) {
+            const ag = bt.age_groups.find(a => a.id == agId);
+            if (ag) {
+                document.getElementById('opt-bird-type').value = bt.id;
+                onOptBirdTypeChange();
+                document.getElementById('opt-age-group').value = agId;
+                break;
+            }
+        }
+    }
+});
+
+function onOptBirdTypeChange() {
+    const btId = parseInt(document.getElementById('opt-bird-type').value);
+    const agSelect = document.getElementById('opt-age-group');
+    agSelect.innerHTML = '<option value="">Оберіть групу...</option>';
+    const bt = speciesTree.find(b => b.id === btId);
+    if (bt) {
+        bt.age_groups.forEach(ag => {
+            agSelect.innerHTML += `<option value="${ag.id}">${ag.name}</option>`;
+        });
+    }
+}
+
+function selectMode(el, mode) {
+    document.querySelectorAll('.radio-option').forEach(o => o.classList.remove('selected'));
+    el.classList.add('selected');
+}
+
+function updateBudgetLabel() {
+    const val = parseInt(document.getElementById('opt-budget').value);
+    const el = document.getElementById('budget-value');
+    if (val === 0) {
+        el.textContent = 'Без обмежень';
+        el.style.color = 'var(--text-secondary)';
+    } else {
+        el.textContent = val + ' ₴/кг';
+        el.style.color = 'var(--primary)';
+    }
+}
+
+function filterOptIngredients() {
+    const q = document.getElementById('opt-ing-search').value.toLowerCase();
+    document.querySelectorAll('.checkbox-item').forEach(item => {
+        const name = item.querySelector('.checkbox-label').textContent.toLowerCase();
+        item.style.display = name.includes(q) ? '' : 'none';
+    });
+}
+
+async function runOptimization() {
+    const agId = document.getElementById('opt-age-group').value;
+    if (!agId) return showToast('Оберіть вікову групу', 'error');
+
+    const ingredientIds = [];
+    document.querySelectorAll('.opt-ingredient-cb:checked').forEach(cb => {
+        ingredientIds.push(parseInt(cb.value));
+    });
+    if (ingredientIds.length < 3) return showToast('Оберіть мінімум 3 інгредієнти', 'error');
+
+    const mode = document.querySelector('input[name="opt-mode"]:checked').value;
+    const budgetRaw = parseInt(document.getElementById('opt-budget').value);
+    const maxBudget = budgetRaw > 0 ? budgetRaw : null;
+
+    const btn = document.getElementById('btn-run-optimization');
+    btn.disabled = true;
+    btn.textContent = '⏳ Обчислюється...';
+    const appliedBudget = maxBudget;
+
+    try {
+        const res = await fetch('/api/optimize', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ age_group_id: parseInt(agId), ingredient_ids: ingredientIds, mode, max_budget: maxBudget })
+        });
+        const result = await res.json();
+        optimizationResult = result;
+        if (result.success) {
+            sessionStorage.setItem('lastOptimizationResult', JSON.stringify(result));
+        }
+        showResults(result, appliedBudget);
+    } catch (e) {
+        showToast('Помилка оптимізації: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '✨ Оптимізувати';
+    }
+}
+
+function showResults(result, appliedBudget) {
+    // Switch to step 2
+    document.getElementById('step-1').style.display = 'none';
+    document.getElementById('step-2').style.display = 'block';
+    document.getElementById('ws-1').classList.remove('active');
+    document.getElementById('ws-1').classList.add('done');
+    document.getElementById('wl-1').classList.add('done');
+    document.getElementById('ws-2').classList.add('active');
+
+    const statusEl = document.getElementById('opt-status');
+
+    if (result.success && !result.is_relaxed) {
+        // ✅ Ідеальний результат
+        statusEl.innerHTML = `<div class="badge badge-normal" style="font-size:14px;padding:8px 16px">${result.status}</div>`;
+
+    } else if (result.success && result.is_relaxed) {
+        // ⚠️ Наближений результат — показуємо банер + згорнуту діагностику
+        let html = `<div style="background:#FFF8E1;border:1px solid #FFD54F;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:flex-start;gap:10px;">
+            <span style="font-size:20px;line-height:1;">⚠️</span>
+            <div>
+                <div style="font-weight:600;margin-bottom:4px;">Норми не можуть бути повністю виконані</div>
+                <div style="font-size:13px;color:var(--text-secondary);">
+                    Показано найкращий можливий варіант. Деякі показники виходять за межі норм — перевірте аналіз праворуч.
+                </div>
+            </div>
+        </div>`;
+
+        // Згорнута діагностика
+        if (result.diagnostics) {
+            const d = result.diagnostics;
+            html += `<details style="margin-bottom:12px;">
+                <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-secondary);padding:6px 0;">
+                    📋 Деталі проблем (знайдено: ${d.problem_count})
+                </summary>
+                <div style="margin-top:10px;">`;
+
+            if (d.missing_data && d.missing_data.length > 0) {
+                html += `<div style="background:#FFF3E0;border:1px solid #FFB74D;border-radius:8px;padding:12px;margin-bottom:10px;font-size:13px;">
+                    <strong>📊 Відсутні дані поживності:</strong> ${d.missing_data.map(m => m.nutrient).join(', ')}
+                </div>`;
+            }
+            if (d.problems && d.problems.length > 0) {
+                html += `<div style="background:#FFEBEE;border:1px solid #EF9A9A;border-radius:8px;padding:12px;font-size:13px;">
+                    <strong>⚠️ Неможливо виконати норми:</strong><br>
+                    ${d.problems.map(p => p.type === 'below_min'
+                        ? `${p.nutrient}: потрібно ≥${p.required_min} ${p.unit}, максимум ${p.max_achievable} ${p.unit}`
+                        : `${p.nutrient}: потрібно ≤${p.required_max} ${p.unit}, мінімум ${p.min_achievable} ${p.unit}`
+                    ).join('<br>')}
+                </div>`;
+            }
+            html += `</div></details>`;
+        }
+        statusEl.innerHTML = html;
+
+    } else {
+        //  Повна невдача (не повинно траплятись після додавання relaxed)
+        let html = `<div class="badge badge-violation" style="font-size:14px;padding:8px 16px;margin-bottom:16px">${result.status}</div>`;
+
+        if (result.diagnostics) {
+            const d = result.diagnostics;
+            html += `<div style="background:var(--bg-warning,#FFF8E1);border:1px solid #FFE082;border-radius:10px;padding:16px;margin-bottom:16px;">
+                <div style="font-weight:600;margin-bottom:6px;">📋 Підсумок аналізу</div>
+                <div style="font-size:13px;color:var(--text-secondary)">
+                    Перевірено обмежень: <strong>${d.total_norms}</strong> &nbsp;|&nbsp;
+                    Знайдено проблем: <strong style="color:#D32F2F">${d.problem_count}</strong>
+                </div>
+            </div>`;
+
+            if (d.recommendations && d.recommendations.length > 0) {
+                html += `<div style="background:#E8F5E9;border:1px solid #A5D6A7;border-radius:10px;padding:16px;">
+                    <div style="font-weight:600;margin-bottom:10px;">💡 Рекомендації</div>`;
+                d.recommendations.forEach(r => {
+                    html += `<div style="background:white;border-radius:8px;padding:12px;margin-bottom:8px;">
+                        <div style="font-weight:600;font-size:14px;">${r.icon} ${r.title}</div>
+                        <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">${r.text}</div>
+                    </div>`;
+                });
+                html += `</div>`;
+            }
+        }
+        statusEl.innerHTML = html;
+        document.getElementById('opt-results-table').style.display = 'none';
+        return;
+    }
+
+    // Показати таблицю результатів
+    document.getElementById('opt-results-table').style.display = '';
+
+    // Results table
+    const tbody = document.getElementById('opt-results-tbody');
+    let totalPct = 0;
+    tbody.innerHTML = result.ingredients.map(ing => {
+        totalPct += ing.percentage;
+        return `<tr>
+            <td><strong>${ing.name}</strong></td>
+            <td style="text-align:center">${ing.percentage.toFixed(2)}</td>
+            <td style="text-align:right">${ing.cost.toFixed(4)}</td>
+        </tr>`;
+    }).join('');
+
+    document.getElementById('opt-total-pct').textContent = totalPct.toFixed(2);
+    document.getElementById('opt-total-cost').textContent = result.total_cost.toFixed(2);
+    document.getElementById('opt-cost-per-kg').textContent = result.total_cost.toFixed(2) + ' ₴';
+
+    // Попередження якщо вартість перевищує заданий бюджет
+    const budgetWarn = document.getElementById('opt-budget-warn');
+    if (appliedBudget && result.total_cost > appliedBudget) {
+        budgetWarn.style.display = '';
+        budgetWarn.innerHTML = `<div style="background:#FFF3E0;border:1px solid #FFB74D;border-radius:8px;padding:10px 14px;margin-top:10px;font-size:13px;">
+            💰 <strong>Увага:</strong> вартість <strong>${result.total_cost.toFixed(2)} ₴/кг</strong> перевищує заданий бюджет <strong>${appliedBudget} ₴/кг</strong>.
+            З поточних інгредієнтів дешевше не виходить.
+        </div>`;
+    } else {
+        budgetWarn.style.display = 'none';
+    }
+
+    // Nutrient analysis
+    const analysisContainer = document.getElementById('opt-analysis-container');
+    if (result.nutrient_analysis) {
+        analysisContainer.innerHTML = result.nutrient_analysis.map(n => {
+            let barPct = 50;
+            if (n.min_value !== null && n.max_value !== null && n.max_value > 0) {
+                barPct = Math.max(5, Math.min(100, ((n.actual_value - n.min_value) / (n.max_value - n.min_value)) * 100));
+            }
+            const statusLabel = {normal: 'Норма', warning: 'Попередження', violation: 'Порушення'}[n.status];
+            const badgeClass = {normal: 'badge-normal', warning: 'badge-warning', violation: 'badge-violation'}[n.status];
+            return `
+            <div class="norm-item">
+                <div class="norm-header">
+                    <span class="norm-name">${n.nutrient_name}</span>
+                    <span class="badge ${badgeClass} norm-badge">${statusLabel}</span>
+                </div>
+                <div class="norm-bar">
+                    <div class="norm-bar-fill ${n.status}" style="width:${barPct}%"></div>
+                </div>
+                <div class="norm-range">
+                    <span>${n.min_value ?? '-'} – ${n.max_value ?? '-'} ${n.unit}</span>
+                    <span class="norm-actual">${n.actual_value} ${n.unit}</span>
+                </div>
+            </div>`;
+        }).join('');
+    }
+}
+
+function goBack() {
+    document.getElementById('step-2').style.display = 'none';
+    document.getElementById('step-1').style.display = 'block';
+    document.getElementById('ws-2').classList.remove('active');
+    document.getElementById('wl-1').classList.remove('done');
+    document.getElementById('ws-1').classList.remove('done');
+    document.getElementById('ws-1').classList.add('active');
+}
+
+function applyToRation() {
+    if (!optimizationResult || !optimizationResult.success) return;
+    // Store in sessionStorage and redirect
+    sessionStorage.setItem('optimizationResult', JSON.stringify(optimizationResult));
+    const agId = document.getElementById('opt-age-group').value;
+    location.href = `/rations?optimized=1&age_group=${agId}`;
+}
+</script>
+{% endblock %}

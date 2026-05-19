@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+{% block title %}НормаКорм — Інгредієнти{% endblock %}
+{% block page_title %}Інгредієнти{% endblock %}
+{% block page_subtitle %}База кормових інгредієнтів та їх характеристики{% endblock %}
+{% block page_actions %}
+<button class="btn btn-primary" onclick="openAddIngredient()" id="btn-add-ingredient">+ Додати інгредієнт</button>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div style="display:flex; gap:16px; margin-bottom:20px; align-items:center;">
+        <div class="search-box" style="flex:1">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="ingredient-search" placeholder="Пошук інгредієнтів..." oninput="filterIngredients()">
+        </div>
+        <select class="form-select" id="category-filter" style="width:200px" onchange="filterIngredients()">
+            <option value="">Всі категорії</option>
+            {% for cat in categories %}
+            <option value="{{ cat.id }}">{{ cat.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <table class="data-table" id="ingredients-table">
+        <thead>
+            <tr>
+                <th>Назва</th>
+                <th>Категорія</th>
+                <th>Вологість %</th>
+                <th>Енергія ккал</th>
+                <th>Протеїн %</th>
+                <th>Жир %</th>
+                <th>Ca %</th>
+                <th>P %</th>
+                <th>Ціна ₴/кг</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody id="ingredients-tbody">
+            <!-- Dynamic -->
+        </tbody>
+    </table>
+</div>
+
+<!-- Modal: Додати/Редагувати інгредієнт -->
+<div class="modal-overlay" id="ingredient-modal">
+    <div class="modal" style="max-width:640px">
+        <div class="modal-header">
+            <h3 class="modal-title" id="ing-modal-title">Додати інгредієнт</h3>
+            <button class="modal-close" onclick="closeModal('ingredient-modal')">&times;</button>
+        </div>
+        <input type="hidden" id="edit-ing-id">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+            <div class="form-group">
+                <label class="form-label">Назва</label>
+                <input type="text" class="form-input" id="ing-name" placeholder="Назва інгредієнта">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Категорія</label>
+                <select class="form-select" id="ing-category">
+                    {% for cat in categories %}
+                    <option value="{{ cat.id }}">{{ cat.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Вологість %</label>
+                <input type="number" step="0.1" class="form-input" id="ing-moisture" value="0">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Ціна ₴/кг</label>
+                <input type="number" step="0.01" class="form-input" id="ing-price" value="0">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Макс. включення %</label>
+                <input type="number" step="0.1" class="form-input" id="ing-max-pct" value="100">
+            </div>
+        </div>
+        <h4 style="margin:16px 0 12px; font-size:15px; font-weight:600;">Поживний склад</h4>
+        <div id="ing-nutrients-container" style="display:grid; grid-template-columns:1fr 1fr; gap:8px 16px;">
+            <!-- Dynamic -->
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeModal('ingredient-modal')">Скасувати</button>
+            <button class="btn btn-primary" onclick="saveIngredient()">Зберегти</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allNutrients = [];
+
+document.addEventListener('DOMContentLoaded', async () => {
+    // Load nutrients for the form
+    const nRes = await fetch('/api/nutrients?category=basic');
+    const basicN = await nRes.json();
+    const aaRes = await fetch('/api/nutrients?category=amino_acid');
+    const aaN = await aaRes.json();
+    allNutrients = [...basicN, ...aaN];
+    renderNutrientInputs();
+    filterIngredients();
+});
+
+function renderNutrientInputs(values = {}) {
+    const container = document.getElementById('ing-nutrients-container');
+    container.innerHTML = allNutrients.map(n => `
+        <div class="form-group" style="margin-bottom:8px;">
+            <label class="form-label" style="font-size:12px">${n.name} (${n.unit})</label>
+            <input type="number" step="any" class="form-input form-input-sm"
+                   data-nutrient-id="${n.id}" value="${values[n.name] || ''}">
+        </div>
+    `).join('');
+}
+
+async function filterIngredients() {
+    const search = document.getElementById('ingredient-search').value;
+    const catId = document.getElementById('category-filter').value;
+    let url = '/api/ingredients?';
+    if (search) url += `search=${encodeURIComponent(search)}&`;
+    if (catId) url += `category_id=${catId}&`;
+
+    const res = await fetch(url);
+    const ingredients = await res.json();
+    renderIngredients(ingredients);
+}
+
+function renderIngredients(ingredients) {
+    const tbody = document.getElementById('ingredients-tbody');
+    if (ingredients.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10"><div class="empty-state"><p class="empty-state-text">Інгредієнти не знайдені</p></div></td></tr>';
+        return;
+    }
+    tbody.innerHTML = ingredients.map(ing => {
+        const n = ing.nutrients;
+        return `
+        <tr>
+            <td><strong>${ing.name}</strong></td>
+            <td><span class="badge-category" style="background:${ing.category_color}">${ing.category_name}</span></td>
+            <td>${ing.moisture ?? '-'}</td>
+            <td>${n['Обмінна енергія'] ?? '-'}</td>
+            <td>${n['Сирий протеїн'] ?? '-'}</td>
+            <td>${n['Сирий жир'] ?? '-'}</td>
+            <td>${n['Кальцій'] ?? '-'}</td>
+            <td>${n['Фосфор'] ?? '-'}</td>
+            <td><strong>${ing.price?.toFixed(2) ?? '-'}</strong></td>
+            <td style="text-align:right">
+                <button class="btn-icon" title="Редагувати" onclick="editIngredient(${ing.id})">✎</button>
+                <button class="btn-icon" title="Видалити" onclick="deleteIngredient(${ing.id}, '${ing.name}')">🗑</button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function openAddIngredient() {
+    document.getElementById('ing-modal-title').textContent = 'Додати інгредієнт';
+    document.getElementById('edit-ing-id').value = '';
+    document.getElementById('ing-name').value = '';
+    document.getElementById('ing-moisture').value = '0';
+    document.getElementById('ing-price').value = '0';
+    document.getElementById('ing-max-pct').value = '100';
+    renderNutrientInputs();
+    document.getElementById('ingredient-modal').classList.add('active');
+}
+
+async function editIngredient(id) {
+    const res = await fetch(`/api/ingredients`);
+    const all = await res.json();
+    const ing = all.find(i => i.id === id);
+    if (!ing) return;
+
+    document.getElementById('ing-modal-title').textContent = 'Редагувати інгредієнт';
+    document.getElementById('edit-ing-id').value = id;
+    document.getElementById('ing-name').value = ing.name;
+    document.getElementById('ing-category').value = ing.category_id;
+    document.getElementById('ing-moisture').value = ing.moisture;
+    document.getElementById('ing-price').value = ing.price;
+    document.getElementById('ing-max-pct').value = ing.max_inclusion_pct;
+    renderNutrientInputs(ing.nutrients);
+    document.getElementById('ingredient-modal').classList.add('active');
+}
+
+async function saveIngredient() {
+    const id = document.getElementById('edit-ing-id').value;
+    const data = {
+        name: document.getElementById('ing-name').value.trim(),
+        category_id: parseInt(document.getElementById('ing-category').value),
+        moisture: parseFloat(document.getElementById('ing-moisture').value) || 0,
+        price: parseFloat(document.getElementById('ing-price').value) || 0,
+        max_inclusion_pct: parseFloat(document.getElementById('ing-max-pct').value) || 100,
+        nutrients: []
+    };
+
+    if (!data.name) return showToast('Введіть назву', 'error');
+
+    document.querySelectorAll('#ing-nutrients-container input').forEach(inp => {
+        if (inp.value) {
+            data.nutrients.push({
+                nutrient_id: parseInt(inp.dataset.nutrientId),
+                value: parseFloat(inp.value)
+            });
+        }
+    });
+
+    const url = id ? `/api/ingredients/${id}` : '/api/ingredients';
+    const method = id ? 'PUT' : 'POST';
+    const res = await fetch(url, {
+        method,
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+
+    if (res.ok) {
+        closeModal('ingredient-modal');
+        showToast(id ? 'Інгредієнт оновлено' : 'Інгредієнт додано', 'success');
+        filterIngredients();
+    }
+}
+
+async function deleteIngredient(id, name) {
+    if (!confirm(`Видалити інгредієнт "${name}"?`)) return;
+    const res = await fetch(`/api/ingredients/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+        showToast('Інгредієнт видалено', 'success');
+        filterIngredients();
+    } else {
+        const data = await res.json();
+        showToast(data.error || 'Помилка видалення', 'error');
+    }
+}
+</script>
+{% endblock %}

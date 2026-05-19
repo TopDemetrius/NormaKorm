@@ -1,0 +1,490 @@
+{% extends "base.html" %}
+{% block title %}НормаКорм — Раціони{% endblock %}
+{% block page_title %}Редактор раціонів{% endblock %}
+{% block page_subtitle %}Створення та редагування кормових раціонів{% endblock %}
+
+{% block content %}
+<!-- Верхній блок параметрів -->
+<div class="card" style="margin-bottom:24px;">
+    <div style="display:grid; grid-template-columns:1fr 180px 220px 120px auto auto; gap:16px; align-items:end;">
+        <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">Назва раціону</label>
+            <input type="text" class="form-input" id="ration-name" placeholder="Введіть назву...">
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">Вид птиці</label>
+            <select class="form-select" id="ration-bird-type" onchange="onBirdTypeChange()">
+                <option value="">Оберіть вид...</option>
+                {% for bt in species_tree %}
+                <option value="{{ bt.id }}">{{ bt.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">Вікова група</label>
+            <select class="form-select" id="ration-age-group" onchange="recalculate()">
+                <option value="">Оберіть групу...</option>
+            </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">Поголів'я</label>
+            <input type="number" class="form-input" id="ration-flock" value="15000" onchange="recalculate()">
+        </div>
+        <button class="btn btn-primary" onclick="saveRation()" style="height:42px">Зберегти</button>
+        <button class="btn btn-secondary" onclick="loadRationList()" style="height:42px">Завантажити</button>
+    </div>
+</div>
+
+<!-- Основний вміст: таблиця + вартість/аналіз -->
+<div style="display:grid; grid-template-columns:1fr 320px; gap:24px;">
+    <!-- Центральна колонка: Склад раціону -->
+    <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+            <h2 class="card-title" style="margin-bottom:0">Склад раціону</h2>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary btn-sm" onclick="addIngredientRow()">+ Додати інгредієнт</button>
+                <button class="btn btn-outline btn-sm" onclick="runOptimization()">✨ Оптимізувати</button>
+            </div>
+        </div>
+        <table class="data-table" id="composition-table">
+            <thead>
+                <tr>
+                    <th>ІНГРЕДІЄНТ</th>
+                    <th style="text-align:center; width:80px">%</th>
+                    <th style="text-align:right">г/ГОЛ/ДЕНЬ</th>
+                    <th style="text-align:right">ВАРТІСТЬ ₴</th>
+                    <th style="width:40px">ДІЇ</th>
+                </tr>
+            </thead>
+            <tbody id="composition-tbody">
+                <!-- Dynamic -->
+            </tbody>
+            <tfoot>
+                <tr class="total-row" id="composition-total">
+                    <td><strong>Всього</strong></td>
+                    <td style="text-align:center"><strong id="total-pct">0</strong></td>
+                    <td style="text-align:right"><strong id="total-grams">0</strong></td>
+                    <td style="text-align:right"><strong id="total-cost">0</strong></td>
+                    <td></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+
+    <!-- Права колонка: Вартість + Аналіз -->
+    <div>
+        <!-- Вартість раціону -->
+        <div class="card" style="margin-bottom:16px;">
+            <h3 style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); margin-bottom:12px;">ВАРТІСТЬ РАЦІОНУ</h3>
+            <div class="cost-big" id="cost-per-head">0.00 ₴</div>
+            <div style="font-size:12px; color:var(--text-muted); margin-bottom:16px;">на голову на день</div>
+
+            <div style="display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; justify-content:space-between; font-size:13px;">
+                    <span style="color:var(--text-secondary)">На місяць (30 днів)</span>
+                    <strong id="cost-per-month">0 ₴</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:13px;">
+                    <span style="color:var(--text-secondary)">На поголів'я (<span id="flock-label">15 000</span>)</span>
+                    <strong id="cost-per-flock">0 ₴</strong>
+                </div>
+                <div style="border-top:1px solid var(--border-light); padding-top:8px; margin-top:4px; display:flex; justify-content:space-between; font-size:13px;">
+                    <span style="color:var(--text-secondary)">Корму на день (1 гол.)</span>
+                    <strong id="feed-per-head-kg">0 кг</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:13px;">
+                    <span style="color:var(--text-secondary)">На все поголів'я за день</span>
+                    <strong id="feed-per-flock-kg">0 кг</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- Аналіз норм -->
+        <div class="card" style="max-height:calc(100vh - 380px); overflow-y:auto;">
+            <h3 style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); margin-bottom:12px;">Аналіз норм</h3>
+            <div class="tabs" style="margin-bottom:12px; flex-wrap:wrap;">
+                <button class="tab active" data-category="basic" onclick="switchAnalysisTab(this)">Базові</button>
+                <button class="tab" data-category="amino_acid" onclick="switchAnalysisTab(this)">Амінокислоти</button>
+                <button class="tab" data-category="vitamin" onclick="switchAnalysisTab(this)">Вітаміни</button>
+                <button class="tab" data-category="microelement" onclick="switchAnalysisTab(this)">Мікроелементи</button>
+            </div>
+            <div id="analysis-container">
+                <div class="empty-state">
+                    <p class="empty-state-text">Оберіть вид птиці та додайте інгредієнти</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Завантажити раціон -->
+<div class="modal-overlay" id="rations-list-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 class="modal-title">Збережені раціони</h3>
+            <button class="modal-close" onclick="closeModal('rations-list-modal')">&times;</button>
+        </div>
+        <div id="rations-list"></div>
+    </div>
+</div>
+
+<!-- Modal: Додати інгредієнт -->
+<div class="modal-overlay" id="add-ing-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 class="modal-title">Додати інгредієнт до раціону</h3>
+            <button class="modal-close" onclick="closeModal('add-ing-modal')">&times;</button>
+        </div>
+        <div class="search-box" style="margin-bottom:16px">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="add-ing-search" placeholder="Пошук..." oninput="filterAvailableIngredients()">
+        </div>
+        <div id="available-ingredients-list" style="max-height:400px; overflow-y:auto;"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const speciesTree = {{ species_tree | tojson }};
+let compositionIngredients = []; // [{ingredient_id, name, percentage, price}]
+let currentAnalysisCategory = 'basic';
+let availableIngredients = [];
+let currentRationId = null;
+let cachedIngredientsData = null; // Кеш для аналізу
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Перевірити чи є дані з оптимізації
+    const params = new URLSearchParams(location.search);
+    const ratId = params.get('id');
+    const isOptimized = params.get('optimized');
+
+    if (isOptimized) {
+        applyOptimizationResult();
+    } else if (ratId) {
+        loadRation(ratId);
+    }
+});
+
+function applyOptimizationResult() {
+    const stored = sessionStorage.getItem('optimizationResult');
+    if (!stored) return;
+    const result = JSON.parse(stored);
+    sessionStorage.removeItem('optimizationResult');
+
+    if (!result.success || !result.ingredients) return;
+
+    // Встановити вікову групу
+    const params = new URLSearchParams(location.search);
+    const agId = params.get('age_group');
+    if (agId) {
+        for (const bt of speciesTree) {
+            const ag = bt.age_groups.find(a => a.id == agId);
+            if (ag) {
+                document.getElementById('ration-bird-type').value = bt.id;
+                onBirdTypeChange();
+                document.getElementById('ration-age-group').value = agId;
+                break;
+            }
+        }
+    }
+
+    // Заповнити інгредієнти з оптимізації
+    compositionIngredients = result.ingredients.map(i => ({
+        ingredient_id: i.id,
+        name: i.name,
+        percentage: parseFloat(i.percentage.toFixed(2)),
+        price: i.price || 0
+    }));
+
+    renderComposition();
+    showToast('Оптимізований раціон завантажено', 'success');
+}
+
+function onBirdTypeChange() {
+    const btId = parseInt(document.getElementById('ration-bird-type').value);
+    const agSelect = document.getElementById('ration-age-group');
+    agSelect.innerHTML = '<option value="">Оберіть групу...</option>';
+    const bt = speciesTree.find(b => b.id === btId);
+    if (bt) {
+        bt.age_groups.forEach(ag => {
+            agSelect.innerHTML += `<option value="${ag.id}">${ag.name}</option>`;
+        });
+    }
+}
+
+function addIngredientRow() {
+    fetch('/api/ingredients').then(r => r.json()).then(ings => {
+        availableIngredients = ings;
+        renderAvailableIngredients(ings);
+        document.getElementById('add-ing-modal').classList.add('active');
+    });
+}
+
+function filterAvailableIngredients() {
+    const q = document.getElementById('add-ing-search').value.toLowerCase();
+    const filtered = availableIngredients.filter(i => i.name.toLowerCase().includes(q));
+    renderAvailableIngredients(filtered);
+}
+
+function renderAvailableIngredients(ings) {
+    const usedIds = compositionIngredients.map(c => c.ingredient_id);
+    const list = document.getElementById('available-ingredients-list');
+    list.innerHTML = ings.filter(i => !usedIds.includes(i.id)).map(i => `
+        <div class="checkbox-item" onclick="selectIngredient(${i.id}, '${i.name.replace(/'/g, "\\'")}', ${i.price || 0})">
+            <div>
+                <div class="checkbox-label">${i.name}</div>
+                <div class="checkbox-sublabel">${i.category_name} • ${i.price?.toFixed(2) || 0} ₴/кг</div>
+            </div>
+        </div>
+    `).join('') || '<div class="empty-state"><p class="empty-state-text">Всі інгредієнти вже додані</p></div>';
+}
+
+function selectIngredient(id, name, price) {
+    compositionIngredients.push({ ingredient_id: id, name, percentage: 0, price });
+    closeModal('add-ing-modal');
+    renderComposition();
+}
+
+function removeIngredient(idx) {
+    compositionIngredients.splice(idx, 1);
+    renderComposition();
+}
+
+function renderComposition() {
+    const tbody = document.getElementById('composition-tbody');
+    const feedPerDayG = getFeedPerDayG();
+
+    tbody.innerHTML = compositionIngredients.map((ing, idx) => {
+        const grams = (ing.percentage * feedPerDayG / 100).toFixed(2);
+        const cost = ((ing.price || 0) * ing.percentage / 100).toFixed(2);
+        return `
+        <tr>
+            <td><strong>${ing.name}</strong></td>
+            <td style="text-align:center">
+                <input type="number" step="0.1" min="0" max="100" class="form-input form-input-sm"
+                       style="width:70px;text-align:center;display:inline-block"
+                       value="${ing.percentage}" onchange="updatePct(${idx}, this.value)">
+            </td>
+            <td style="text-align:right">${grams}</td>
+            <td style="text-align:right">${cost}</td>
+            <td>
+                <button class="delete-ingredient-btn" onclick="removeIngredient(${idx})" title="Видалити">🗑</button>
+            </td>
+        </tr>`;
+    }).join('');
+    recalculate();
+}
+
+function updatePct(idx, val) {
+    compositionIngredients[idx].percentage = parseFloat(val) || 0;
+    renderComposition();
+}
+
+function getFeedPerDayG() {
+    // Орієнтоване споживання корму на день (г) — 120г як базове
+    return 120;
+}
+
+function recalculate() {
+    const feedPerDayG = getFeedPerDayG();
+    const flock = parseInt(document.getElementById('ration-flock').value) || 0;
+    let totalPct = 0, totalCostPerKg = 0;
+
+    compositionIngredients.forEach(ing => {
+        totalPct += ing.percentage;
+        totalCostPerKg += (ing.price || 0) * ing.percentage / 100;
+    });
+
+    const feedPerHeadG = totalPct * feedPerDayG / 100;
+    const feedPerHeadKg = feedPerHeadG / 1000;
+    const costPerHeadDay = totalCostPerKg * feedPerDayG / 1000;
+    const costPerMonth = costPerHeadDay * 30;
+    const costPerFlockDay = costPerHeadDay * flock;
+    const feedPerFlockKg = feedPerHeadKg * flock;
+
+    // Таблиця
+    document.getElementById('total-pct').textContent = totalPct.toFixed(1);
+    document.getElementById('total-grams').textContent = feedPerHeadG.toFixed(2);
+    document.getElementById('total-cost').textContent = totalCostPerKg.toFixed(2);
+
+    // Вартість раціону
+    document.getElementById('cost-per-head').textContent = costPerHeadDay.toFixed(2) + ' ₴';
+    document.getElementById('cost-per-month').textContent = costPerMonth.toFixed(2) + ' ₴';
+    document.getElementById('flock-label').textContent = flock.toLocaleString('uk-UA');
+    document.getElementById('cost-per-flock').textContent = costPerFlockDay.toFixed(2) + ' ₴';
+    document.getElementById('feed-per-head-kg').textContent = feedPerHeadKg.toFixed(3) + ' кг';
+    document.getElementById('feed-per-flock-kg').textContent = feedPerFlockKg.toFixed(1) + ' кг';
+
+    // Аналіз норм
+    updateAnalysis();
+}
+
+async function updateAnalysis() {
+    const agId = document.getElementById('ration-age-group').value;
+    if (!agId || compositionIngredients.length === 0) return;
+
+    // Fetch norms for current category
+    const normsRes = await fetch(`/api/species/norms/${agId}?category=${currentAnalysisCategory}`);
+    const norms = await normsRes.json();
+
+    // Fetch ingredient data (з кешуванням)
+    if (!cachedIngredientsData) {
+        const ingRes = await fetch('/api/ingredients');
+        cachedIngredientsData = await ingRes.json();
+    }
+
+    const container = document.getElementById('analysis-container');
+    let html = '';
+
+    // Фільтруємо лише норми з min або max значенням
+    const activeNorms = norms.filter(n => n.min_value !== null || n.max_value !== null);
+
+    activeNorms.forEach(norm => {
+        let actual = 0;
+        compositionIngredients.forEach(ci => {
+            const ingData = cachedIngredientsData.find(i => i.id === ci.ingredient_id);
+            if (ingData && ingData.nutrients[norm.nutrient_name]) {
+                actual += ingData.nutrients[norm.nutrient_name] * ci.percentage / 100;
+            }
+        });
+
+        const minV = norm.min_value;
+        const maxV = norm.max_value;
+        let status = 'normal';
+        let barPct = 50;
+
+        if (minV !== null && maxV !== null) {
+            if (actual < minV) {
+                const dev = minV > 0 ? (minV - actual) / minV * 100 : 0;
+                status = dev <= 10 ? 'warning' : 'violation';
+                barPct = Math.max(5, (actual / maxV) * 100);
+            } else if (actual > maxV) {
+                const dev = maxV > 0 ? (actual - maxV) / maxV * 100 : 0;
+                status = dev <= 10 ? 'warning' : 'violation';
+                barPct = 100;
+            } else {
+                barPct = ((actual - minV) / (maxV - minV)) * 100;
+                barPct = Math.max(5, Math.min(100, barPct));
+            }
+        }
+
+        const statusLabel = {normal: 'Норма', warning: 'Попередження', violation: 'Порушення'}[status];
+        const badgeClass = {normal: 'badge-normal', warning: 'badge-warning', violation: 'badge-violation'}[status];
+
+        html += `
+        <div class="norm-item">
+            <div class="norm-header">
+                <span class="norm-name">${norm.nutrient_name}</span>
+                <span class="badge ${badgeClass} norm-badge">${statusLabel}</span>
+            </div>
+            <div class="norm-bar">
+                <div class="norm-bar-fill ${status}" style="width:${barPct}%"></div>
+            </div>
+            <div class="norm-range">
+                <span>${minV ?? '-'} – ${maxV ?? '-'} ${norm.unit}</span>
+                <span class="norm-actual">${actual.toFixed(2)} ${norm.unit}</span>
+            </div>
+        </div>`;
+    });
+
+    container.innerHTML = html || '<div class="empty-state"><p class="empty-state-text">Норми не задані для цієї категорії</p></div>';
+}
+
+function switchAnalysisTab(btn) {
+    btn.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    currentAnalysisCategory = btn.dataset.category;
+    recalculate();
+}
+
+async function saveRation() {
+    const name = document.getElementById('ration-name').value.trim();
+    const agId = document.getElementById('ration-age-group').value;
+    const flock = parseInt(document.getElementById('ration-flock').value) || 1000;
+
+    if (!name) return showToast('Введіть назву раціону', 'error');
+    if (!agId) return showToast('Оберіть вікову групу', 'error');
+    if (compositionIngredients.length === 0) return showToast('Додайте хоча б один інгредієнт', 'error');
+
+    const data = {
+        name,
+        age_group_id: parseInt(agId),
+        flock_size: flock,
+        ingredients: compositionIngredients.map(c => ({
+            ingredient_id: c.ingredient_id,
+            percentage: c.percentage
+        }))
+    };
+
+    const url = currentRationId ? `/api/rations/${currentRationId}` : '/api/rations';
+    const method = currentRationId ? 'PUT' : 'POST';
+    const res = await fetch(url, {
+        method,
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+
+    if (res.ok) {
+        const result = await res.json();
+        if (!currentRationId) currentRationId = result.id;
+        showToast('Раціон збережено', 'success');
+    }
+}
+
+async function loadRationList() {
+    const res = await fetch('/api/rations');
+    const rations = await res.json();
+    const list = document.getElementById('rations-list');
+    list.innerHTML = rations.map(r => `
+        <div class="report-item" style="cursor:pointer" onclick="loadRation(${r.id}); closeModal('rations-list-modal');">
+            <div class="report-item-info">
+                <div>
+                    <div class="report-item-name">${r.name}</div>
+                    <div class="report-item-meta">${r.bird_type_name} • ${r.age_group_name}</div>
+                </div>
+            </div>
+        </div>
+    `).join('') || '<div class="empty-state"><p class="empty-state-text">Раціони ще не створено</p></div>';
+    document.getElementById('rations-list-modal').classList.add('active');
+}
+
+async function loadRation(id) {
+    const res = await fetch(`/api/rations/${id}`);
+    const data = await res.json();
+    currentRationId = id;
+
+    document.getElementById('ration-name').value = data.name;
+    document.getElementById('ration-flock').value = data.flock_size;
+
+    // Set bird type and age group
+    const btSelect = document.getElementById('ration-bird-type');
+    for (const bt of speciesTree) {
+        if (bt.age_groups.some(ag => ag.id === data.age_group_id)) {
+            btSelect.value = bt.id;
+            onBirdTypeChange();
+            document.getElementById('ration-age-group').value = data.age_group_id;
+            break;
+        }
+    }
+
+    compositionIngredients = data.ingredients.map(i => ({
+        ingredient_id: i.ingredient_id,
+        name: i.ingredient_name,
+        percentage: i.percentage,
+        price: i.price
+    }));
+    cachedIngredientsData = null; // Скинути кеш
+    renderComposition();
+}
+
+function runOptimization() {
+    const agId = document.getElementById('ration-age-group').value;
+    if (!agId) {
+        showToast('Спочатку оберіть вікову групу', 'warning');
+        return;
+    }
+    location.href = `/optimization?age_group=${agId}`;
+}
+</script>
+{% endblock %}

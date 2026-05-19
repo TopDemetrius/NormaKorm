@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+{% block title %}НормаКорм — Види та норми{% endblock %}
+{% block page_title %}Види та норми{% endblock %}
+{% block page_subtitle %}Управління видами тварин та нормами годівлі{% endblock %}
+{% block page_actions %}
+<button class="btn btn-primary" onclick="openAddModal()">+ Додати вид/групу</button>
+{% endblock %}
+
+{% block content %}
+<div class="layout-split">
+    <!-- Дерево видів -->
+    <div class="card">
+        <ul class="tree" id="species-tree">
+            {% for bt in species_tree %}
+            {% set outer_first = loop.first %}
+            <li class="tree-parent {% if loop.first %}open{% endif %}">
+                <button class="tree-toggle" onclick="toggleTree(this)">
+                    <svg class="tree-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg>
+                    <strong>{{ bt.name }}</strong>
+                </button>
+                <ul class="tree-children">
+                    {% for ag in bt.age_groups %}
+                    <li class="tree-child {% if loop.first and outer_first %}active{% endif %}"
+                        data-ag-id="{{ ag.id }}"
+                        onclick="selectAgeGroup(this, {{ ag.id }})">
+                        {{ ag.name }}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <!-- Норми -->
+    <div class="card">
+        <div class="tabs" id="norm-tabs">
+            <button class="tab active" data-category="basic" onclick="switchNormTab(this)">Норми %</button>
+            <button class="tab" data-category="per_head" onclick="switchNormTab(this)">На голову/день</button>
+            <button class="tab" data-category="amino_acid" onclick="switchNormTab(this)">Амінокислоти</button>
+            <button class="tab" data-category="microelement" onclick="switchNormTab(this)">Мікроелементи</button>
+            <button class="tab" data-category="vitamin" onclick="switchNormTab(this)">Вітаміни</button>
+        </div>
+        <div id="norms-table-container">
+            <table class="data-table" id="norms-table">
+                <thead>
+                    <tr>
+                        <th>Показник</th>
+                        <th>Одиниця</th>
+                        <th style="text-align:center">Мінімум</th>
+                        <th style="text-align:center">Максимум</th>
+                    </tr>
+                </thead>
+                <tbody id="norms-tbody">
+                    <!-- Dynamic -->
+                </tbody>
+            </table>
+            <div class="empty-state" id="norms-empty" style="display:none;">
+                <p class="empty-state-text">Оберіть вікову групу зліва.</p>
+            </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+            <button class="btn btn-secondary" onclick="loadNorms()">Скасувати</button>
+            <button class="btn btn-primary" onclick="saveNorms()">Зберегти зміни</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Додати вид/групу -->
+<div class="modal-overlay" id="add-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 class="modal-title">Додати вид/групу</h3>
+            <button class="modal-close" onclick="closeModal('add-modal')">&times;</button>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Тип дії</label>
+            <select class="form-select" id="add-action">
+                <option value="bird_type">Додати вид птиці</option>
+                <option value="age_group">Додати вікову групу</option>
+            </select>
+        </div>
+        <div class="form-group" id="add-bt-select-group" style="display:none;">
+            <label class="form-label">Вид птиці</label>
+            <select class="form-select" id="add-bt-select">
+                {% for bt in species_tree %}
+                <option value="{{ bt.id }}">{{ bt.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Назва</label>
+            <input type="text" class="form-input" id="add-name" placeholder="Введіть назву...">
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeModal('add-modal')">Скасувати</button>
+            <button class="btn btn-primary" onclick="submitAdd()">Додати</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentAgId = null;
+let currentCategory = 'basic';
+
+// Init: load first age group
+document.addEventListener('DOMContentLoaded', () => {
+    const first = document.querySelector('.tree-child.active');
+    if (first) {
+        currentAgId = first.dataset.agId;
+        loadNorms();
+    }
+
+    document.getElementById('add-action').addEventListener('change', function() {
+        document.getElementById('add-bt-select-group').style.display = 
+            this.value === 'age_group' ? 'block' : 'none';
+    });
+});
+
+function toggleTree(btn) {
+    btn.parentElement.classList.toggle('open');
+}
+
+function selectAgeGroup(el, agId) {
+    document.querySelectorAll('.tree-child').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+    currentAgId = agId;
+    loadNorms();
+}
+
+function switchNormTab(btn) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    currentCategory = btn.dataset.category;
+    loadNorms();
+}
+
+async function loadNorms() {
+    if (!currentAgId) return;
+    const res = await fetch(`/api/species/norms/${currentAgId}?category=${currentCategory}`);
+    const norms = await res.json();
+    const tbody = document.getElementById('norms-tbody');
+    const empty = document.getElementById('norms-empty');
+    
+    if (norms.length === 0) {
+        tbody.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+    }
+    empty.style.display = 'none';
+
+    // Тепер norms містить ВСІ поживні речовини категорії,
+    // min/max будуть null якщо норма ще не задана
+    tbody.innerHTML = norms.map(n => {
+        const hasValue = n.min_value !== null || n.max_value !== null;
+        const rowClass = hasValue ? '' : 'style="opacity:0.6"';
+        return `
+        <tr ${rowClass}>
+            <td><strong>${n.nutrient_name}</strong></td>
+            <td style="color:var(--text-muted)">${n.unit}</td>
+            <td style="text-align:center">
+                <input type="number" step="any" class="form-input form-input-sm" style="width:100px;text-align:center;display:inline-block"
+                       data-nid="${n.nutrient_id}" data-field="min" value="${n.min_value ?? ''}"
+                       placeholder="-" oninput="highlightRow(this)">
+            </td>
+            <td style="text-align:center">
+                <input type="number" step="any" class="form-input form-input-sm" style="width:100px;text-align:center;display:inline-block"
+                       data-nid="${n.nutrient_id}" data-field="max" value="${n.max_value ?? ''}"
+                       placeholder="-" oninput="highlightRow(this)">
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function highlightRow(input) {
+    // Коли вводимо значення, рядок стає повністю видимим
+    input.closest('tr').style.opacity = '1';
+}
+
+async function saveNorms() {
+    const rows = document.querySelectorAll('#norms-tbody tr');
+    const norms = [];
+    const toDelete = [];
+
+    rows.forEach(row => {
+        const minInput = row.querySelector('[data-field="min"]');
+        const maxInput = row.querySelector('[data-field="max"]');
+        const nid = parseInt(minInput.dataset.nid);
+        const minVal = minInput.value ? parseFloat(minInput.value) : null;
+        const maxVal = maxInput.value ? parseFloat(maxInput.value) : null;
+
+        if (minVal !== null || maxVal !== null) {
+            // Є значення — зберегти/оновити
+            norms.push({
+                nutrient_id: nid,
+                min_value: minVal,
+                max_value: maxVal
+            });
+        } else {
+            // Обидва порожні — видалити норму якщо існувала
+            toDelete.push(nid);
+        }
+    });
+
+    // Зберегти норми з значеннями
+    if (norms.length > 0) {
+        await fetch('/api/species/norms', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ age_group_id: currentAgId, norms })
+        });
+    }
+
+    // Видалити порожні норми
+    for (const nid of toDelete) {
+        await fetch('/api/species/norms/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ age_group_id: currentAgId, nutrient_id: nid })
+        });
+    }
+
+    showToast('Норми збережено', 'success');
+    loadNorms();
+}
+
+function openAddModal() {
+    document.getElementById('add-name').value = '';
+    document.getElementById('add-modal').classList.add('active');
+}
+
+async function submitAdd() {
+    const action = document.getElementById('add-action').value;
+    const name = document.getElementById('add-name').value.trim();
+    if (!name) return showToast('Введіть назву', 'error');
+
+    const body = { action, name };
+    if (action === 'age_group') {
+        body.bird_type_id = parseInt(document.getElementById('add-bt-select').value);
+    }
+    const res = await fetch('/api/species/add', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (res.ok) {
+        showToast('Додано успішно', 'success');
+        setTimeout(() => location.reload(), 500);
+    } else {
+        showToast(data.error || 'Помилка додавання', 'error');
+    }
+}
+</script>
+{% endblock %}
